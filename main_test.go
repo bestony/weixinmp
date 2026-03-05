@@ -13,6 +13,10 @@ import (
 	"github.com/alecthomas/kong"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func captureStdoutStderr(t *testing.T, fn func()) (string, string) {
 	t.Helper()
 
@@ -250,6 +254,162 @@ func TestSignatureVerifyCmdRun(t *testing.T) {
 	}
 	if err := bad.Run(&CLI{}); err == nil {
 		t.Fatalf("Run(bad) err = nil, want non-nil")
+	}
+}
+
+func TestOfficialAccountGetAPIDomainIPCmdRunText(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			q := r.URL.Query()
+			if got, want := q.Get("appid"), "app"; got != want {
+				t.Fatalf("appid = %q, want %q", got, want)
+			}
+			if got, want := q.Get("secret"), "secret"; got != want {
+				t.Fatalf("secret = %q, want %q", got, want)
+			}
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/get_api_domain_ip":
+			if got, want := r.URL.Query().Get("access_token"), "abc"; got != want {
+				t.Fatalf("access_token = %q, want %q", got, want)
+			}
+			return jsonHTTPResponse(`{"ip_list":["1.1.1.1","2.2.2.2"]}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountGetAPIDomainIPCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "text",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+		if got, want := stdout, "1.1.1.1\n2.2.2.2\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestOfficialAccountGetAPIDomainIPCmdRunJSON(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/get_api_domain_ip":
+			return jsonHTTPResponse(`{"ip_list":["1.1.1.1","2.2.2.2"]}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountGetAPIDomainIPCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "json",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+
+		var got map[string]any
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+			t.Fatalf("json.Unmarshal(stdout) err = %v, want nil", err)
+		}
+		ipList, ok := got["ip_list"].([]any)
+		if !ok {
+			t.Fatalf("ip_list type = %T, want []any", got["ip_list"])
+		}
+		if len(ipList) != 2 || ipList[0] != "1.1.1.1" || ipList[1] != "2.2.2.2" {
+			t.Fatalf("ip_list = %#v, want %#v", ipList, []any{"1.1.1.1", "2.2.2.2"})
+		}
+	})
+}
+
+func TestCLIUsesEnvVarsForOfficialAccountGetAPIDomainIP(t *testing.T) {
+	t.Helper()
+
+	t.Setenv(envWeixinAppID, "app")
+	t.Setenv(envWeixinSecret, "secret")
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			q := r.URL.Query()
+			if got := q.Get("appid"); got != "app" {
+				t.Fatalf("appid = %q, want %q", got, "app")
+			}
+			if got := q.Get("secret"); got != "secret" {
+				t.Fatalf("secret = %q, want %q", got, "secret")
+			}
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/get_api_domain_ip":
+			return jsonHTTPResponse(`{"ip_list":["1.1.1.1"]}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		var cli CLI
+		parser, err := kong.New(&cli,
+			kong.Name("weixinmp"),
+			kong.UsageOnError(),
+			kong.Vars{"version": buildVersion()},
+		)
+		if err != nil {
+			t.Fatalf("kong.New() err = %v, want nil", err)
+		}
+
+		ctx, err := parser.Parse([]string{
+			"official-account", "get-api-domain-ip",
+			"--timeout", "2s",
+			"--output", "text",
+		})
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := ctx.Run(); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+		if got, want := stdout, "1.1.1.1\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	})
+}
+
+func withDefaultTransport(t *testing.T, transport http.RoundTripper, fn func()) {
+	t.Helper()
+
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = transport
+	defer func() {
+		http.DefaultTransport = oldTransport
+	}()
+
+	fn()
+}
+
+func jsonHTTPResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 

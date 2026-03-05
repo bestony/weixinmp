@@ -222,6 +222,8 @@ func TestCLI_HelpFromPackagedBinary(t *testing.T) {
 		"A small CLI toolbox for WeChat Official Account (Weixin MP).",
 		"--debug",
 		"--version",
+		"official-account get-api-domain-ip",
+		"Fetch WeChat API domain IP addresses for the official account.",
 		"token get",
 		"Fetch access token via client_credential.",
 		"signature compute",
@@ -385,6 +387,28 @@ func TestCLI_HelpForSubcommandContainsFlags(t *testing.T) {
 		"--secret=STRING",
 		"--timeout",
 		"--base-url",
+		"--output",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCLI_HelpForOfficialAccountSubcommandContainsFlags(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	stdout, stderr, code := runBin(t, binPath, nil, "official-account", "get-api-domain-ip", "--help")
+	if code != 0 {
+		t.Fatalf("official-account get-api-domain-ip --help exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	out := stdout + stderr
+	for _, want := range []string{
+		"Usage: weixinmp official-account get-api-domain-ip",
+		"--app-id=STRING",
+		"--secret=STRING",
+		"--timeout",
 		"--output",
 	} {
 		if !strings.Contains(out, want) {
