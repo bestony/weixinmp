@@ -12,9 +12,6 @@ import (
 )
 
 const (
-	envWeixinAppID  = "WEIXINMP_APPID"
-	envWeixinSecret = "WEIXINMP_SECRET"
-
 	envTestAppID  = "APPID"
 	envTestSecret = "APPSECRET"
 )

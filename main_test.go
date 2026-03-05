@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -341,18 +343,22 @@ func TestOfficialAccountGetAPIDomainIPCmdRunJSON(t *testing.T) {
 func TestCLIUsesEnvVarsForOfficialAccountGetAPIDomainIP(t *testing.T) {
 	t.Helper()
 
-	t.Setenv(envWeixinAppID, "app")
-	t.Setenv(envWeixinSecret, "secret")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigFile(t, filepath.Join(home, ".weixinmp", "config.toml"), "config-app", "config-secret")
+
+	t.Setenv(envWeixinAppID, "env-app")
+	t.Setenv(envWeixinSecret, "env-secret")
 
 	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/cgi-bin/token":
 			q := r.URL.Query()
-			if got := q.Get("appid"); got != "app" {
-				t.Fatalf("appid = %q, want %q", got, "app")
+			if got := q.Get("appid"); got != "env-app" {
+				t.Fatalf("appid = %q, want %q", got, "env-app")
 			}
-			if got := q.Get("secret"); got != "secret" {
-				t.Fatalf("secret = %q, want %q", got, "secret")
+			if got := q.Get("secret"); got != "env-secret" {
+				t.Fatalf("secret = %q, want %q", got, "env-secret")
 			}
 			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
 		case "/cgi-bin/get_api_domain_ip":
@@ -438,12 +444,14 @@ func TestMainRuns(t *testing.T) {
 func TestCLIUsesEnvVarsForTokenGet(t *testing.T) {
 	t.Helper()
 
-	// Ensure these are set via .env.test (or fallback defaults in TestMain).
-	appID := os.Getenv(envWeixinAppID)
-	secret := os.Getenv(envWeixinSecret)
-	if appID == "" || secret == "" {
-		t.Fatalf("%s/%s not set, want both non-empty", envWeixinAppID, envWeixinSecret)
-	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigFile(t, filepath.Join(home, ".weixinmp", "config.toml"), "config-app", "config-secret")
+
+	appID := "env-app"
+	secret := "env-secret"
+	t.Setenv(envWeixinAppID, appID)
+	t.Setenv(envWeixinSecret, secret)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -469,6 +477,122 @@ func TestCLIUsesEnvVarsForTokenGet(t *testing.T) {
 	}
 
 	ctx, err := parser.Parse([]string{
+		"token", "get",
+		"--base-url", srv.URL,
+		"--timeout", "2s",
+		"--output", "text",
+	})
+	if err != nil {
+		t.Fatalf("Parse() err = %v, want nil", err)
+	}
+
+	stdout, _ := captureStdoutStderr(t, func() {
+		if err := ctx.Run(); err != nil {
+			t.Fatalf("Run() err = %v, want nil", err)
+		}
+	})
+	if got, want := stdout, "abc\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func writeConfigFile(t *testing.T, path, appID, secret string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) err = %v, want nil", filepath.Dir(path), err)
+	}
+	content := fmt.Sprintf("app_id = %q\nsecret = %q\n", appID, secret)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) err = %v, want nil", path, err)
+	}
+	return path
+}
+
+func TestCLIDefaultConfigUsedForTokenGet(t *testing.T) {
+	t.Helper()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigFile(t, filepath.Join(home, ".weixinmp", "config.toml"), "config-app", "config-secret")
+	t.Setenv(envWeixinAppID, "")
+	t.Setenv(envWeixinSecret, "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if got := q.Get("appid"); got != "config-app" {
+			t.Fatalf("appid = %q, want %q", got, "config-app")
+		}
+		if got := q.Get("secret"); got != "config-secret" {
+			t.Fatalf("secret = %q, want %q", got, "config-secret")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
+	}))
+	defer srv.Close()
+
+	var cli CLI
+	parser, err := kong.New(&cli,
+		kong.Name("weixinmp"),
+		kong.UsageOnError(),
+		kong.Vars{"version": buildVersion()},
+	)
+	if err != nil {
+		t.Fatalf("kong.New() err = %v, want nil", err)
+	}
+
+	ctx, err := parser.Parse([]string{
+		"token", "get",
+		"--base-url", srv.URL,
+		"--timeout", "2s",
+		"--output", "text",
+	})
+	if err != nil {
+		t.Fatalf("Parse() err = %v, want nil", err)
+	}
+
+	stdout, _ := captureStdoutStderr(t, func() {
+		if err := ctx.Run(); err != nil {
+			t.Fatalf("Run() err = %v, want nil", err)
+		}
+	})
+	if got, want := stdout, "abc\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCLIConfigFlagUsedForTokenGet(t *testing.T) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "custom.toml")
+	writeConfigFile(t, configPath, "flag-app", "flag-secret")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if got := q.Get("appid"); got != "flag-app" {
+			t.Fatalf("appid = %q, want %q", got, "flag-app")
+		}
+		if got := q.Get("secret"); got != "flag-secret" {
+			t.Fatalf("secret = %q, want %q", got, "flag-secret")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
+	}))
+	defer srv.Close()
+
+	var cli CLI
+	parser, err := kong.New(&cli,
+		kong.Name("weixinmp"),
+		kong.UsageOnError(),
+		kong.Vars{"version": buildVersion()},
+	)
+	if err != nil {
+		t.Fatalf("kong.New() err = %v, want nil", err)
+	}
+
+	ctx, err := parser.Parse([]string{
+		"--config", configPath,
 		"token", "get",
 		"--base-url", srv.URL,
 		"--timeout", "2s",

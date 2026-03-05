@@ -19,12 +19,17 @@ var (
 )
 
 type CLI struct {
-	Debug   bool             `help:"Enable debug logging."`
-	Version kong.VersionFlag `help:"Print version information and quit."`
+	Debug      bool             `help:"Enable debug logging."`
+	Version    kong.VersionFlag `help:"Print version information and quit."`
+	ConfigPath string           `name:"config" help:"Path to config file (default: ~/.weixinmp/config.toml)."`
 
 	Token           TokenCmd           `cmd:"" help:"WeChat Official Account access token helpers."`
 	Signature       SignatureCmd       `cmd:"" help:"WeChat signature helpers."`
 	OfficialAccount OfficialAccountCmd `cmd:"" help:"WeChat Official Account helpers powered by silenceper/wechat."`
+
+	config       *Config
+	configLoaded bool
+	configErr    error
 }
 
 type TokenCmd struct {
@@ -32,8 +37,8 @@ type TokenCmd struct {
 }
 
 type TokenGetCmd struct {
-	AppID   string        `help:"WeChat appid." env:"WEIXINMP_APPID" required:""`
-	Secret  string        `help:"WeChat secret." env:"WEIXINMP_SECRET" required:""`
+	AppID   string        `help:"WeChat appid (overrides env/config)."`
+	Secret  string        `help:"WeChat secret (overrides env/config)."`
 	Timeout time.Duration `help:"HTTP timeout." default:"10s"`
 	BaseURL string        `help:"WeChat API base URL." default:"https://api.weixin.qq.com"`
 
@@ -41,6 +46,11 @@ type TokenGetCmd struct {
 }
 
 func (c *TokenGetCmd) Run(cli *CLI) error {
+	appID, secret, err := cli.resolveCredentials(c.AppID, c.Secret)
+	if err != nil {
+		return err
+	}
+
 	httpClient := &http.Client{Timeout: c.Timeout}
 	client := &weixinmp.Client{
 		BaseURL:    c.BaseURL,
@@ -51,7 +61,7 @@ func (c *TokenGetCmd) Run(cli *CLI) error {
 	defer cancel()
 
 	debugf(cli, "requesting access token from %s", c.BaseURL)
-	token, err := client.GetAccessToken(ctx, c.AppID, c.Secret)
+	token, err := client.GetAccessToken(ctx, appID, secret)
 	if err != nil {
 		return err
 	}
@@ -79,21 +89,26 @@ type OfficialAccountCmd struct {
 }
 
 type OfficialAccountGetAPIDomainIPCmd struct {
-	AppID   string        `help:"WeChat appid." env:"WEIXINMP_APPID" required:""`
-	Secret  string        `help:"WeChat secret." env:"WEIXINMP_SECRET" required:""`
+	AppID   string        `help:"WeChat appid (overrides env/config)."`
+	Secret  string        `help:"WeChat secret (overrides env/config)."`
 	Timeout time.Duration `help:"HTTP timeout." default:"10s"`
 
 	Output string `help:"Output format." enum:"text,json" default:"text"`
 }
 
 func (c *OfficialAccountGetAPIDomainIPCmd) Run(cli *CLI) error {
+	appID, secret, err := cli.resolveCredentials(c.AppID, c.Secret)
+	if err != nil {
+		return err
+	}
+
 	httpClient := &http.Client{Timeout: c.Timeout}
 	client := &weixinmp.OfficialAccountClient{
 		HTTPClient: httpClient,
 	}
 
 	debugf(cli, "requesting official account API domain IP via silenceper/wechat")
-	ipList, err := client.GetAPIDomainIP(c.AppID, c.Secret)
+	ipList, err := client.GetAPIDomainIP(appID, secret)
 	if err != nil {
 		return err
 	}

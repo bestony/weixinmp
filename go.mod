@@ -4,6 +4,7 @@ go 1.25.2
 
 require (
 	github.com/alecthomas/kong v1.14.0
+	github.com/pelletier/go-toml/v2 v2.2.1
 	github.com/silenceper/wechat/v2 v2.1.12
 )
 
