@@ -11,15 +11,11 @@ import (
 	"testing"
 )
 
-const (
-	envTestAppID  = "APPID"
-	envTestSecret = "APPSECRET"
-)
-
 func TestMain(m *testing.M) {
 	if err := loadEnvForTests(); err != nil {
-		// Keep it explicit and fail-fast: tests that rely on env should not
-		// silently run with wrong credentials/config.
+		// Keep it explicit and fail-fast on malformed local test config, without
+		// mutating process-wide credential env that unit tests intentionally
+		// exercise.
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
@@ -34,38 +30,12 @@ func loadEnvForTests() error {
 	}
 
 	path := filepath.Join(root, ".env.test")
-	envs, err := parseDotEnvFile(path)
-	if err != nil {
+	if _, err := parseDotEnvFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Optional: CI shouldn't require a local .env.test file.
-			envs = map[string]string{}
-		} else {
-			return fmt.Errorf("load %s: %w", path, err)
+			return nil
 		}
-	}
-
-	// Precedence:
-	//  1) Existing env vars (eg. CI secrets)
-	//  2) Keys in .env.test
-	//  3) Safe defaults (unit tests use mocked HTTP server)
-	appID := firstNonEmpty(
-		os.Getenv(envWeixinAppID),
-		envs[envWeixinAppID],
-		envs[envTestAppID],
-		"test-appid",
-	)
-	secret := firstNonEmpty(
-		os.Getenv(envWeixinSecret),
-		envs[envWeixinSecret],
-		envs[envTestSecret],
-		"test-appsecret",
-	)
-
-	if os.Getenv(envWeixinAppID) == "" {
-		_ = os.Setenv(envWeixinAppID, appID)
-	}
-	if os.Getenv(envWeixinSecret) == "" {
-		_ = os.Setenv(envWeixinSecret, secret)
+		return fmt.Errorf("load %s: %w", path, err)
 	}
 
 	return nil
@@ -143,15 +113,6 @@ func parseDotEnvFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	return envs, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func TestParseDotEnvFile(t *testing.T) {
