@@ -12,7 +12,10 @@
 
 当前版本聚焦微信公众号基础接口里的几个高频场景：
 
+- 解析微信服务器推送的 XML 消息 / 事件
+- 生成被动回复 XML（文本、图片、图文、语音、视频、音乐、转客服）
 - 查询微信服务器 callback IP / IP 段
+- 按文本、图文、语音、图片、视频类型群发消息
 - 计算与校验开发者接入所需的 SHA1 签名
 - 查询公众号接口调用所使用的 API 域名 IP 列表
 - 清理接口调用频次
@@ -23,8 +26,11 @@
 
 - 支持通过命令行、环境变量或配置文件读取公众号凭据
 - 支持文本与 JSON 两种输出格式，方便脚本集成
+- 支持解析入站微信 XML 消息为文本或 JSON
+- 支持生成多种被动回复 XML
 - 支持计算和校验微信服务器接入签名
 - 支持查询微信服务器 callback IP 列表
+- 支持按多种消息类型执行公众号群发
 - 支持查询公众号 API 域名 IP 列表
 - 支持清理公众号接口调用频次
 - 内置 `--debug`、`--version`、`--config` 等通用选项
@@ -173,7 +179,143 @@ weixinmp official-account clear-quota --output json
 
 参考 `silenceper/wechat` 文档，这个接口存在官方调用限制，不建议随意执行。
 
-### 5. 计算服务器接入签名
+### 5. 群发消息
+
+群发文本消息：
+
+```bash
+weixinmp official-account broadcast send-text \
+  --to-all \
+  --content "hello followers"
+```
+
+按标签群发图文消息：
+
+```bash
+weixinmp official-account broadcast send-news \
+  --tag-id 2 \
+  --media-id MEDIA_ID \
+  --ignore-reprint
+```
+
+按 OpenID 群发语音 / 图片 / 视频消息：
+
+```bash
+weixinmp official-account broadcast send-voice \
+  --open-id openid-1,openid-2 \
+  --media-id MEDIA_ID
+
+weixinmp official-account broadcast send-image \
+  --open-id openid-1 \
+  --media-id MEDIA_ID_1,MEDIA_ID_2
+
+weixinmp official-account broadcast send-video \
+  --open-id openid-1 \
+  --media-id MEDIA_ID \
+  --title "视频标题" \
+  --description "视频描述"
+```
+
+更完整的参数说明见 `docs/official-account-broadcast.md`。
+
+### 6. 解析入站消息 XML
+
+```bash
+weixinmp message parse --input-file message.xml --output json
+```
+
+如果不指定 `--input-file`，会从标准输入读取 XML：
+
+```bash
+cat message.xml | weixinmp message parse
+```
+
+示例输出：
+
+```json
+{
+  "ToUserName": "gh_xxxxx",
+  "FromUserName": "oUserOpenID",
+  "CreateTime": 1710000000,
+  "MsgType": "text",
+  "Content": "hello"
+}
+```
+
+如果只想看简要信息：
+
+```bash
+weixinmp message parse --input-file message.xml --output text
+```
+
+### 7. 生成被动文本回复
+
+最方便的方式是直接复用原始请求 XML，让 CLI 自动交换 `ToUserName` / `FromUserName`：
+
+```bash
+weixinmp message reply text \
+  --request-file message.xml \
+  --content "收到，你好"
+```
+
+如果你已经知道双方账号，也可以直接指定：
+
+```bash
+weixinmp message reply text \
+  --to-user oUserOpenID \
+  --from-user gh_xxxxx \
+  --content "收到，你好"
+```
+
+### 8. 生成其他被动回复
+
+图片回复：
+
+```bash
+weixinmp message reply image \
+  --to-user oUserOpenID \
+  --from-user gh_xxxxx \
+  --media-id MEDIA_ID
+```
+
+图文回复：
+
+```bash
+weixinmp message reply news \
+  --to-user oUserOpenID \
+  --from-user gh_xxxxx \
+  --article '{"title":"测试图文","description":"图文描述","pic_url":"https://example.com/1.png","url":"https://example.com/1"}'
+```
+
+音乐回复：
+
+```bash
+weixinmp message reply music \
+  --to-user oUserOpenID \
+  --from-user gh_xxxxx \
+  --title "标题" \
+  --description "描述" \
+  --music-url "https://example.com/music.mp3" \
+  --hq-music-url "https://example.com/music-hq.mp3" \
+  --thumb-media-id THUMB_MEDIA_ID
+```
+
+转发到客服：
+
+```bash
+weixinmp message reply transfer-customer-service \
+  --request-file message.xml \
+  --kf-account "test1@test"
+```
+
+同一组命令还支持：
+
+- `message reply voice`
+- `message reply video`
+
+其中 `news` 支持重复传入多个 `--article`，也支持用 `--article-file` 指向 JSON 数组文件。
+
+### 9. 计算服务器接入签名
 
 ```bash
 weixinmp signature compute \
@@ -186,7 +328,7 @@ weixinmp signature compute \
 
 签名相关命令不依赖 `AppID` 或 `Secret`。
 
-### 6. 校验服务器接入签名
+### 10. 校验服务器接入签名
 
 ```bash
 weixinmp signature verify \
@@ -209,12 +351,23 @@ signature mismatch
 - 获取微信 callback IP → `weixinmp official-account get-callback-ip`
 - 获取微信 API 接口 IP → `weixinmp official-account get-api-domain-ip`
 - 清理接口调用频次 → `weixinmp official-account clear-quota`
+- 群发消息 → `weixinmp official-account broadcast ...`
+- 解析入站消息 / 事件 XML → `weixinmp message parse`
+- 生成被动回复 XML → `weixinmp message reply ...`
 
-更完整的命令示例与接口映射见 `docs/official-account-basic.md`。
+更完整的命令示例与接口映射见：
+
+- `docs/official-account-basic.md`
+- `docs/official-account-broadcast.md`
+- `docs/official-account-message.md`
+
 参考文档：
 
 - `silenceper/wechat` 公众号基础接口说明：<https://silenceper.com/wechat/officialaccount/basic.html>
 - `silenceper/wechat` 对应实现：<https://github.com/silenceper/wechat/blob/master/officialaccount/basic/basic.go>
+- `silenceper/wechat` 群发接口说明：<https://silenceper.com/wechat/officialaccount/broadcast.html>
+- `silenceper/wechat` 消息管理说明：<https://silenceper.com/wechat/officialaccount/message.html>
+- 更完整的消息命令示例：`docs/official-account-message.md`
 
 ## 命令总览
 
@@ -224,11 +377,14 @@ weixinmp <command> [flags]
 
 当前提供的命令包括：
 
+- `message parse`：解析微信服务器推送 XML
+- `message reply text|image|news|voice|video|music|transfer-customer-service`：生成被动回复 XML
 - `signature compute`：计算微信公众号开发者接入签名
 - `signature verify`：校验微信公众号开发者接入签名
 - `official-account get-callback-ip`：查询微信服务器 callback IP 列表
 - `official-account get-api-domain-ip`：查询公众号接口调用 IP 列表
 - `official-account clear-quota`：清理公众号接口调用频次
+- `official-account broadcast send-text|send-news|send-voice|send-image|send-video`：按不同消息类型执行群发
 
 常用全局参数：
 
@@ -303,7 +459,7 @@ APPSECRET=your_app_secret_here
 ├── docs/                       # 补充文档与接口对照说明
 ├── *_test.go                   # CLI、配置、dotenv、端到端测试
 ├── internal/weixinmp/
-│   ├── official_account.go     # 公众号基础接口封装（callback IP / API Domain IP / ClearQuota）
+│   ├── official_account.go     # 公众号基础接口封装（callback IP / API Domain IP / ClearQuota / Broadcast）
 │   ├── signature.go            # SHA1 签名计算与校验
 │   └── *_test.go               # 对应单元测试
 └── .github/workflows/          # 测试、覆盖率与发布流程
@@ -311,12 +467,13 @@ APPSECRET=your_app_secret_here
 
 ## 设计说明
 
-- `official-account get-callback-ip`、`official-account get-api-domain-ip`、`official-account clear-quota` 基于 `silenceper/wechat` SDK 实现
+- `official-account get-callback-ip`、`official-account get-api-domain-ip`、`official-account clear-quota`、`official-account broadcast ...` 基于 `silenceper/wechat` SDK 实现
 - 输出格式尽量保持简单，便于 shell 脚本、CI 或其他程序消费
 
 ## 适用场景
 
 - 本地调试微信公众号接口接入
+- 对全量、标签或指定 OpenID 执行群发测试
 - 验证微信服务器回调参数中的签名是否正确
 - 获取微信服务器回调来源 IP 或 IP 段，用于白名单配置
 - 排查公众号 API 域名解析、网络访问或白名单相关问题

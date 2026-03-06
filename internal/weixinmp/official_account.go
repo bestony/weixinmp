@@ -7,7 +7,9 @@ import (
 
 	silenceperwechat "github.com/silenceper/wechat/v2"
 	"github.com/silenceper/wechat/v2/cache"
+	officialaccount "github.com/silenceper/wechat/v2/officialaccount"
 	officialaccountbasic "github.com/silenceper/wechat/v2/officialaccount/basic"
+	officialaccountbroadcast "github.com/silenceper/wechat/v2/officialaccount/broadcast"
 	officialaccountconfig "github.com/silenceper/wechat/v2/officialaccount/config"
 	wechatutil "github.com/silenceper/wechat/v2/util"
 )
@@ -23,6 +25,15 @@ type CallbackIPList = IPList
 // APIDomainIPList is the successful response from get_api_domain_ip.
 type APIDomainIPList = IPList
 
+// BroadcastUser identifies who should receive a broadcast.
+type BroadcastUser = officialaccountbroadcast.User
+
+// BroadcastImage is the image payload for image broadcasts.
+type BroadcastImage = officialaccountbroadcast.Image
+
+// BroadcastResult is the successful response from a broadcast send operation.
+type BroadcastResult = officialaccountbroadcast.Result
+
 // OfficialAccountClient talks to WeChat Official Account APIs via silenceper/wechat.
 type OfficialAccountClient struct {
 	HTTPClient *http.Client
@@ -30,7 +41,7 @@ type OfficialAccountClient struct {
 
 var officialAccountSDKMu sync.Mutex
 
-func (c *OfficialAccountClient) withBasic(appID, secret string, fn func(*officialaccountbasic.Basic) error) error {
+func (c *OfficialAccountClient) withOfficialAccount(appID, secret string, fn func(*officialaccount.OfficialAccount) error) error {
 	httpClient := c.HTTPClient
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -53,7 +64,35 @@ func (c *OfficialAccountClient) withBasic(appID, secret string, fn func(*officia
 		AppSecret: secret,
 	})
 
-	return fn(officialAccount.GetBasic())
+	return fn(officialAccount)
+}
+
+func (c *OfficialAccountClient) withBasic(appID, secret string, fn func(*officialaccountbasic.Basic) error) error {
+	return c.withOfficialAccount(appID, secret, func(officialAccount *officialaccount.OfficialAccount) error {
+		return fn(officialAccount.GetBasic())
+	})
+}
+
+func (c *OfficialAccountClient) withBroadcast(appID, secret string, fn func(*officialaccountbroadcast.Broadcast) error) error {
+	return c.withOfficialAccount(appID, secret, func(officialAccount *officialaccount.OfficialAccount) error {
+		return fn(officialAccount.GetBroadcast())
+	})
+}
+
+func (c *OfficialAccountClient) withBroadcastResult(appID, secret, action string, fn func(*officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error)) (BroadcastResult, error) {
+	var result *officialaccountbroadcast.Result
+	err := c.withBroadcast(appID, secret, func(broadcast *officialaccountbroadcast.Broadcast) error {
+		var err error
+		result, err = fn(broadcast)
+		if err != nil {
+			return fmt.Errorf("%s: %w", action, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return BroadcastResult{}, err
+	}
+	return *result, nil
 }
 
 func (c *OfficialAccountClient) GetCallbackIP(appID, secret string) (CallbackIPList, error) {
@@ -94,5 +133,35 @@ func (c *OfficialAccountClient) ClearQuota(appID, secret string) error {
 			return fmt.Errorf("clear official account quota: %w", err)
 		}
 		return nil
+	})
+}
+
+func (c *OfficialAccountClient) BroadcastSendText(appID, secret string, user *BroadcastUser, content string) (BroadcastResult, error) {
+	return c.withBroadcastResult(appID, secret, "broadcast send text", func(broadcast *officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error) {
+		return broadcast.SendText(user, content)
+	})
+}
+
+func (c *OfficialAccountClient) BroadcastSendNews(appID, secret string, user *BroadcastUser, mediaID string, ignoreReprint bool) (BroadcastResult, error) {
+	return c.withBroadcastResult(appID, secret, "broadcast send news", func(broadcast *officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error) {
+		return broadcast.SendNews(user, mediaID, ignoreReprint)
+	})
+}
+
+func (c *OfficialAccountClient) BroadcastSendVoice(appID, secret string, user *BroadcastUser, mediaID string) (BroadcastResult, error) {
+	return c.withBroadcastResult(appID, secret, "broadcast send voice", func(broadcast *officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error) {
+		return broadcast.SendVoice(user, mediaID)
+	})
+}
+
+func (c *OfficialAccountClient) BroadcastSendImage(appID, secret string, user *BroadcastUser, image *BroadcastImage) (BroadcastResult, error) {
+	return c.withBroadcastResult(appID, secret, "broadcast send image", func(broadcast *officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error) {
+		return broadcast.SendImage(user, image)
+	})
+}
+
+func (c *OfficialAccountClient) BroadcastSendVideo(appID, secret string, user *BroadcastUser, mediaID, title, description string) (BroadcastResult, error) {
+	return c.withBroadcastResult(appID, secret, "broadcast send video", func(broadcast *officialaccountbroadcast.Broadcast) (*officialaccountbroadcast.Result, error) {
+		return broadcast.SendVideo(user, mediaID, title, description)
 	})
 }

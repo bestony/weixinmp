@@ -203,10 +203,16 @@ func TestCLI_HelpFromPackagedBinary(t *testing.T) {
 		"A small CLI toolbox for WeChat Official Account (Weixin MP).",
 		"--debug",
 		"--version",
+		"message parse",
+		"Parse inbound WeChat XML messages from file or stdin.",
+		"message reply text",
+		"Generate passive text reply XML.",
 		"official-account get-callback-ip",
 		"Fetch WeChat callback IP addresses for the official account.",
 		"official-account clear-quota",
 		"Clear official account API call quota counters.",
+		"official-account broadcast send-text",
+		"Broadcast text content.",
 		"official-account get-api-domain-ip",
 		"Fetch WeChat API domain IP addresses for the official account.",
 		"signature compute",
@@ -275,6 +281,48 @@ func TestCLI_HelpForOfficialAccountSubcommandContainsFlags(t *testing.T) {
 	}
 }
 
+func TestCLI_HelpForMessageParseContainsFlags(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	stdout, stderr, code := runBin(t, binPath, nil, "message", "parse", "--help")
+	if code != 0 {
+		t.Fatalf("message parse --help exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	out := stdout + stderr
+	for _, want := range []string{
+		"Usage: weixinmp message parse",
+		"--input-file=STRING",
+		"--output",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCLI_HelpForMessageReplyTextContainsFlags(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	stdout, stderr, code := runBin(t, binPath, nil, "message", "reply", "text", "--help")
+	if code != 0 {
+		t.Fatalf("message reply text --help exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	out := stdout + stderr
+	for _, want := range []string{
+		"Usage: weixinmp message reply text",
+		"--request-file=STRING",
+		"--to-user=STRING",
+		"--from-user=STRING",
+		"--content=STRING",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q\n%s", want, out)
+		}
+	}
+}
+
 func TestCLI_HelpForOfficialAccountGetCallbackIPContainsFlags(t *testing.T) {
 	t.Helper()
 
@@ -297,6 +345,71 @@ func TestCLI_HelpForOfficialAccountGetCallbackIPContainsFlags(t *testing.T) {
 	}
 }
 
+func TestCLI_MessageParse_JSON(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "message.xml")
+	if err := os.WriteFile(inputPath, []byte(`<xml>
+  <ToUserName><![CDATA[gh_123]]></ToUserName>
+  <FromUserName><![CDATA[user_456]]></FromUserName>
+  <CreateTime>1710000000</CreateTime>
+  <MsgType><![CDATA[text]]></MsgType>
+  <Content><![CDATA[hello]]></Content>
+</xml>`), 0o600); err != nil {
+		t.Fatalf("WriteFile() err = %v, want nil", err)
+	}
+
+	stdout, stderr, code := runBin(t, binPath, nil,
+		"message", "parse",
+		"--input-file", inputPath,
+		"--output", "json",
+	)
+	if code != 0 {
+		t.Fatalf("message parse exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	if !strings.Contains(stdout, `"Content":"hello"`) {
+		t.Fatalf("stdout = %q, want contains %q", stdout, `"Content":"hello"`)
+	}
+}
+
+func TestCLI_MessageReplyText_WithRequestFile(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	dir := t.TempDir()
+	requestPath := filepath.Join(dir, "request.xml")
+	if err := os.WriteFile(requestPath, []byte(`<xml>
+  <ToUserName><![CDATA[gh_123]]></ToUserName>
+  <FromUserName><![CDATA[user_456]]></FromUserName>
+  <CreateTime>1710000000</CreateTime>
+  <MsgType><![CDATA[text]]></MsgType>
+  <Content><![CDATA[hello]]></Content>
+</xml>`), 0o600); err != nil {
+		t.Fatalf("WriteFile() err = %v, want nil", err)
+	}
+
+	stdout, stderr, code := runBin(t, binPath, nil,
+		"message", "reply", "text",
+		"--request-file", requestPath,
+		"--create-time", "1710000001",
+		"--content", "world",
+	)
+	if code != 0 {
+		t.Fatalf("message reply text exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	for _, want := range []string{
+		"<ToUserName><![CDATA[user_456]]></ToUserName>",
+		"<FromUserName><![CDATA[gh_123]]></FromUserName>",
+		"<Content><![CDATA[world]]></Content>",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout = %q, want contains %q", stdout, want)
+		}
+	}
+}
+
 func TestCLI_HelpForOfficialAccountClearQuotaContainsFlags(t *testing.T) {
 	t.Helper()
 
@@ -312,6 +425,32 @@ func TestCLI_HelpForOfficialAccountClearQuotaContainsFlags(t *testing.T) {
 		"--secret=STRING",
 		"--timeout",
 		"--output",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCLI_HelpForOfficialAccountBroadcastSendTextContainsFlags(t *testing.T) {
+	t.Helper()
+
+	binPath := buildBinary(t, "")
+	stdout, stderr, code := runBin(t, binPath, nil, "official-account", "broadcast", "send-text", "--help")
+	if code != 0 {
+		t.Fatalf("official-account broadcast send-text --help exitCode=%d, want 0 (stderr=%q)", code, stderr)
+	}
+	out := stdout + stderr
+	for _, want := range []string{
+		"Usage: weixinmp official-account broadcast send-text",
+		"--app-id=STRING",
+		"--secret=STRING",
+		"--timeout",
+		"--output",
+		"--to-all",
+		"--tag-id=INT",
+		"--open-id=STRING",
+		"--content=STRING",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q\n%s", want, out)
