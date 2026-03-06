@@ -10,11 +10,12 @@
 
 `weixinmp` 是一个面向微信公众号（Weixin MP / Official Account）的轻量级命令行工具，适合在本地调试、脚本自动化、CI 流程或服务接入排障时使用。
 
-当前版本聚焦三个高频场景：
+当前版本聚焦微信公众号基础接口里的几个高频场景：
 
-- 获取公众号 `access_token`
+- 查询微信服务器 callback IP / IP 段
 - 计算与校验开发者接入所需的 SHA1 签名
 - 查询公众号接口调用所使用的 API 域名 IP 列表
+- 清理接口调用频次
 
 项目使用 Go 编写，命令行基于 `kong`，并对关键行为提供了完整测试覆盖。
 
@@ -23,7 +24,9 @@
 - 支持通过命令行、环境变量或配置文件读取公众号凭据
 - 支持文本与 JSON 两种输出格式，方便脚本集成
 - 支持计算和校验微信服务器接入签名
+- 支持查询微信服务器 callback IP 列表
 - 支持查询公众号 API 域名 IP 列表
+- 支持清理公众号接口调用频次
 - 内置 `--debug`、`--version`、`--config` 等通用选项
 - CI 约束总测试覆盖率保持在 `100%`
 
@@ -75,79 +78,41 @@ secret = "your-wechat-secret"
 如果你不想使用默认路径，也可以显式指定：
 
 ```bash
-weixinmp --config /path/to/config.toml token get
+weixinmp --config /path/to/config.toml official-account get-api-domain-ip
 ```
 
-### 2. 获取 Access Token
+### 2. 查询微信服务器 callback IP
 
 ```bash
-weixinmp token get
+weixinmp official-account get-callback-ip
 ```
 
-默认输出纯文本 token：
+默认按文本逐行输出：
 
 ```text
-ACCESS_TOKEN_VALUE
+101.226.103.0
+101.226.62.77
+...
 ```
 
 如需 JSON 输出：
 
 ```bash
-weixinmp token get --output json
+weixinmp official-account get-callback-ip --output json
 ```
 
 示例输出：
 
 ```json
 {
-  "access_token": "ACCESS_TOKEN_VALUE",
-  "expires_in": 7200
+  "ip_list": [
+    "101.226.103.0",
+    "101.226.62.77"
+  ]
 }
 ```
 
-你也可以在调试或测试时直接通过参数覆盖凭据：
-
-```bash
-weixinmp token get \
-  --app-id wx1234567890abcdef \
-  --secret your-wechat-secret
-```
-
-如需控制请求行为，还可以使用：
-
-- `--timeout`：设置 HTTP 超时时间，默认 `10s`
-- `--base-url`：覆盖微信 API 基地址，便于联调或测试
-
-### 3. 计算服务器接入签名
-
-```bash
-weixinmp signature compute \
-  --token your-token \
-  --timestamp 1710000000 \
-  --nonce 123456
-```
-
-该命令会输出根据微信规则排序并进行 SHA1 计算后的签名。
-
-签名相关命令不依赖 `AppID` 或 `Secret`。
-
-### 4. 校验服务器接入签名
-
-```bash
-weixinmp signature verify \
-  --token your-token \
-  --timestamp 1710000000 \
-  --nonce 123456 \
-  --signature calculated-signature
-```
-
-校验成功时命令直接退出；校验失败时返回错误：
-
-```text
-signature mismatch
-```
-
-### 5. 查询 API 域名 IP 列表
+### 3. 查询 API 域名 IP 列表
 
 ```bash
 weixinmp official-account get-api-domain-ip
@@ -178,7 +143,78 @@ weixinmp official-account get-api-domain-ip --output json
 }
 ```
 
-该命令同样支持 `--timeout`，默认值为 `10s`。
+这两个 IP 查询命令都支持 `--timeout`，默认值为 `10s`。
+
+### 4. 清理接口调用频次
+
+```bash
+weixinmp official-account clear-quota
+```
+
+默认输出：
+
+```text
+ok
+```
+
+如需 JSON 输出：
+
+```bash
+weixinmp official-account clear-quota --output json
+```
+
+示例输出：
+
+```json
+{
+  "ok": true
+}
+```
+
+参考 `silenceper/wechat` 文档，这个接口存在官方调用限制，不建议随意执行。
+
+### 5. 计算服务器接入签名
+
+```bash
+weixinmp signature compute \
+  --token your-token \
+  --timestamp 1710000000 \
+  --nonce 123456
+```
+
+该命令会输出根据微信规则排序并进行 SHA1 计算后的签名。
+
+签名相关命令不依赖 `AppID` 或 `Secret`。
+
+### 6. 校验服务器接入签名
+
+```bash
+weixinmp signature verify \
+  --token your-token \
+  --timestamp 1710000000 \
+  --nonce 123456 \
+  --signature calculated-signature
+```
+
+校验成功时命令直接退出；校验失败时返回错误：
+
+```text
+signature mismatch
+```
+
+## 文档对照
+
+当前 CLI 对齐了 `silenceper/wechat` 公众号基础接口文档中的以下能力：
+
+- 获取微信 callback IP → `weixinmp official-account get-callback-ip`
+- 获取微信 API 接口 IP → `weixinmp official-account get-api-domain-ip`
+- 清理接口调用频次 → `weixinmp official-account clear-quota`
+
+更完整的命令示例与接口映射见 `docs/official-account-basic.md`。
+参考文档：
+
+- `silenceper/wechat` 公众号基础接口说明：<https://silenceper.com/wechat/officialaccount/basic.html>
+- `silenceper/wechat` 对应实现：<https://github.com/silenceper/wechat/blob/master/officialaccount/basic/basic.go>
 
 ## 命令总览
 
@@ -188,10 +224,11 @@ weixinmp <command> [flags]
 
 当前提供的命令包括：
 
-- `token get`：通过 `client_credential` 模式获取公众号 `access_token`
 - `signature compute`：计算微信公众号开发者接入签名
 - `signature verify`：校验微信公众号开发者接入签名
+- `official-account get-callback-ip`：查询微信服务器 callback IP 列表
 - `official-account get-api-domain-ip`：查询公众号接口调用 IP 列表
+- `official-account clear-quota`：清理公众号接口调用频次
 
 常用全局参数：
 
@@ -242,7 +279,7 @@ go test ./... -coverprofile=coverage.out -covermode=atomic
 
 ### 本地测试凭据
 
-项目提供了 `.env.test.example`，可用于本地测试：
+项目提供了 `.env.test.example`，可作为本地测试配置模板：
 
 ```bash
 cp .env.test.example .env.test
@@ -255,12 +292,7 @@ APPID=your_appid_here
 APPSECRET=your_app_secret_here
 ```
 
-测试会将这些值映射到：
-
-- `WEIXINMP_APPID`
-- `WEIXINMP_SECRET`
-
-如果没有提供本地测试凭据，单元测试默认也可以使用安全的占位值配合 mocked HTTP 服务运行。
+当前仓库内的大多数单元测试都使用 mocked HTTP 服务，不依赖真实公众号凭据；`.env.test` 主要用于保留一份本地测试配置模板，并在测试启动时校验其格式是否正确。
 
 ## 项目结构
 
@@ -268,10 +300,10 @@ APPSECRET=your_app_secret_here
 .
 ├── main.go                     # CLI 入口与命令定义
 ├── config.go                   # 配置文件、环境变量与参数优先级处理
+├── docs/                       # 补充文档与接口对照说明
 ├── *_test.go                   # CLI、配置、dotenv、端到端测试
 ├── internal/weixinmp/
-│   ├── client.go               # access_token HTTP 客户端
-│   ├── official_account.go     # 公众号 API 域名 IP 查询
+│   ├── official_account.go     # 公众号基础接口封装（callback IP / API Domain IP / ClearQuota）
 │   ├── signature.go            # SHA1 签名计算与校验
 │   └── *_test.go               # 对应单元测试
 └── .github/workflows/          # 测试、覆盖率与发布流程
@@ -279,16 +311,16 @@ APPSECRET=your_app_secret_here
 
 ## 设计说明
 
-- `token get` 直接调用微信 `/cgi-bin/token` 接口
-- `official-account get-api-domain-ip` 基于 `silenceper/wechat` SDK 实现
+- `official-account get-callback-ip`、`official-account get-api-domain-ip`、`official-account clear-quota` 基于 `silenceper/wechat` SDK 实现
 - 输出格式尽量保持简单，便于 shell 脚本、CI 或其他程序消费
 
 ## 适用场景
 
 - 本地调试微信公众号接口接入
-- 编写 shell 脚本批量获取 `access_token`
 - 验证微信服务器回调参数中的签名是否正确
+- 获取微信服务器回调来源 IP 或 IP 段，用于白名单配置
 - 排查公众号 API 域名解析、网络访问或白名单相关问题
+- 在开发/测试阶段按需清理接口调用频次
 
 ## License
 

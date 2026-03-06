@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,116 +106,6 @@ func TestDebugf(t *testing.T) {
 	}
 }
 
-func TestTokenGetCmdRunText(t *testing.T) {
-	t.Helper()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if got, want := q.Get("appid"), "app"; got != want {
-			t.Fatalf("appid = %q, want %q", got, want)
-		}
-		if got, want := q.Get("secret"), "secret"; got != want {
-			t.Fatalf("secret = %q, want %q", got, want)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	cmd := &TokenGetCmd{
-		AppID:   "app",
-		Secret:  "secret",
-		BaseURL: srv.URL,
-		Timeout: 2 * time.Second,
-		Output:  "text",
-	}
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := cmd.Run(&CLI{}); err != nil {
-			t.Fatalf("Run() err = %v, want nil", err)
-		}
-	})
-	if got, want := stdout, "abc\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-}
-
-func TestTokenGetCmdRunJSON(t *testing.T) {
-	t.Helper()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	cmd := &TokenGetCmd{
-		AppID:   "app",
-		Secret:  "secret",
-		BaseURL: srv.URL,
-		Timeout: 2 * time.Second,
-		Output:  "json",
-	}
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := cmd.Run(&CLI{}); err != nil {
-			t.Fatalf("Run() err = %v, want nil", err)
-		}
-	})
-
-	var got map[string]any
-	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
-		t.Fatalf("json.Unmarshal(stdout) err = %v, want nil", err)
-	}
-	if got["access_token"] != "abc" {
-		t.Fatalf("access_token = %v, want %q", got["access_token"], "abc")
-	}
-	if got["expires_in"] != float64(7200) {
-		t.Fatalf("expires_in = %v, want %d", got["expires_in"], 7200)
-	}
-}
-
-func TestTokenGetCmdRunUnsupportedOutput(t *testing.T) {
-	t.Helper()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	cmd := &TokenGetCmd{
-		AppID:   "app",
-		Secret:  "secret",
-		BaseURL: srv.URL,
-		Timeout: 2 * time.Second,
-		Output:  "yaml",
-	}
-	_, _ = captureStdoutStderr(t, func() {
-		if err := cmd.Run(&CLI{}); err == nil {
-			t.Fatalf("Run() err = nil, want non-nil")
-		}
-	})
-}
-
-func TestTokenGetCmdRunGetAccessTokenError(t *testing.T) {
-	t.Helper()
-
-	cmd := &TokenGetCmd{
-		AppID:   "app",
-		Secret:  "secret",
-		BaseURL: "http://[::1", // invalid URL (missing ']')
-		Timeout: 2 * time.Second,
-		Output:  "text",
-	}
-	_, stderr := captureStdoutStderr(t, func() {
-		if err := cmd.Run(&CLI{Debug: true}); err == nil {
-			t.Fatalf("Run() err = nil, want non-nil")
-		}
-	})
-	if !strings.Contains(stderr, "debug: requesting access token") {
-		t.Fatalf("stderr = %q, want debug log", stderr)
-	}
-}
-
 func TestSignatureComputeCmdRun(t *testing.T) {
 	t.Helper()
 
@@ -257,6 +146,87 @@ func TestSignatureVerifyCmdRun(t *testing.T) {
 	if err := bad.Run(&CLI{}); err == nil {
 		t.Fatalf("Run(bad) err = nil, want non-nil")
 	}
+}
+
+func TestOfficialAccountGetCallbackIPCmdRunText(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			q := r.URL.Query()
+			if got, want := q.Get("appid"), "app"; got != want {
+				t.Fatalf("appid = %q, want %q", got, want)
+			}
+			if got, want := q.Get("secret"), "secret"; got != want {
+				t.Fatalf("secret = %q, want %q", got, want)
+			}
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/getcallbackip":
+			if got, want := r.URL.Query().Get("access_token"), "abc"; got != want {
+				t.Fatalf("access_token = %q, want %q", got, want)
+			}
+			return jsonHTTPResponse(`{"ip_list":["120.1.1.1","120.1.1.2"]}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountGetCallbackIPCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "text",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+		if got, want := stdout, "120.1.1.1\n120.1.1.2\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestOfficialAccountGetCallbackIPCmdRunJSON(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/getcallbackip":
+			return jsonHTTPResponse(`{"ip_list":["120.1.1.1","120.1.1.2"]}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountGetCallbackIPCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "json",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+
+		var got map[string]any
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+			t.Fatalf("json.Unmarshal(stdout) err = %v, want nil", err)
+		}
+		ipList, ok := got["ip_list"].([]any)
+		if !ok {
+			t.Fatalf("ip_list type = %T, want []any", got["ip_list"])
+		}
+		if len(ipList) != 2 || ipList[0] != "120.1.1.1" || ipList[1] != "120.1.1.2" {
+			t.Fatalf("ip_list = %#v, want %#v", ipList, []any{"120.1.1.1", "120.1.1.2"})
+		}
+	})
 }
 
 func TestOfficialAccountGetAPIDomainIPCmdRunText(t *testing.T) {
@@ -336,6 +306,86 @@ func TestOfficialAccountGetAPIDomainIPCmdRunJSON(t *testing.T) {
 		}
 		if len(ipList) != 2 || ipList[0] != "1.1.1.1" || ipList[1] != "2.2.2.2" {
 			t.Fatalf("ip_list = %#v, want %#v", ipList, []any{"1.1.1.1", "2.2.2.2"})
+		}
+	})
+}
+
+func TestOfficialAccountClearQuotaCmdRunText(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/clear_quota":
+			if got, want := r.Method, http.MethodPost; got != want {
+				t.Fatalf("method = %q, want %q", got, want)
+			}
+			if got, want := r.URL.Query().Get("access_token"), "abc"; got != want {
+				t.Fatalf("access_token = %q, want %q", got, want)
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("ReadAll(body) err = %v, want nil", err)
+			}
+			if got, want := strings.TrimSpace(string(body)), `{"appid":"app"}`; got != want {
+				t.Fatalf("body = %q, want %q", got, want)
+			}
+			return jsonHTTPResponse(`{"errcode":0,"errmsg":"ok"}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountClearQuotaCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "text",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+		if got, want := stdout, "ok\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestOfficialAccountClearQuotaCmdRunJSON(t *testing.T) {
+	t.Helper()
+
+	withDefaultTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			return jsonHTTPResponse(`{"access_token":"abc","expires_in":7200}`), nil
+		case "/cgi-bin/clear_quota":
+			return jsonHTTPResponse(`{"errcode":0,"errmsg":"ok"}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		return nil, nil
+	}), func() {
+		cmd := &OfficialAccountClearQuotaCmd{
+			AppID:   "app",
+			Secret:  "secret",
+			Timeout: 2 * time.Second,
+			Output:  "json",
+		}
+		stdout, _ := captureStdoutStderr(t, func() {
+			if err := cmd.Run(&CLI{}); err != nil {
+				t.Fatalf("Run() err = %v, want nil", err)
+			}
+		})
+
+		var got map[string]any
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+			t.Fatalf("json.Unmarshal(stdout) err = %v, want nil", err)
+		}
+		if ok, okType := got["ok"].(bool); !okType || !ok {
+			t.Fatalf("ok = %#v, want true", got["ok"])
 		}
 	})
 }
@@ -441,61 +491,6 @@ func TestMainRuns(t *testing.T) {
 	}
 }
 
-func TestCLIUsesEnvVarsForTokenGet(t *testing.T) {
-	t.Helper()
-
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	writeConfigFile(t, filepath.Join(home, ".weixinmp", "config.toml"), "config-app", "config-secret")
-
-	appID := "env-app"
-	secret := "env-secret"
-	t.Setenv(envWeixinAppID, appID)
-	t.Setenv(envWeixinSecret, secret)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if got := q.Get("appid"); got != appID {
-			t.Fatalf("appid = %q, want %q", got, appID)
-		}
-		if got := q.Get("secret"); got != secret {
-			t.Fatalf("secret = %q, want %q", got, secret)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	var cli CLI
-	parser, err := kong.New(&cli,
-		kong.Name("weixinmp"),
-		kong.UsageOnError(),
-		kong.Vars{"version": buildVersion()},
-	)
-	if err != nil {
-		t.Fatalf("kong.New() err = %v, want nil", err)
-	}
-
-	ctx, err := parser.Parse([]string{
-		"token", "get",
-		"--base-url", srv.URL,
-		"--timeout", "2s",
-		"--output", "text",
-	})
-	if err != nil {
-		t.Fatalf("Parse() err = %v, want nil", err)
-	}
-
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := ctx.Run(); err != nil {
-			t.Fatalf("Run() err = %v, want nil", err)
-		}
-	})
-	if got, want := stdout, "abc\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-}
-
 func writeConfigFile(t *testing.T, path, appID, secret string) string {
 	t.Helper()
 
@@ -507,107 +502,4 @@ func writeConfigFile(t *testing.T, path, appID, secret string) string {
 		t.Fatalf("WriteFile(%s) err = %v, want nil", path, err)
 	}
 	return path
-}
-
-func TestCLIDefaultConfigUsedForTokenGet(t *testing.T) {
-	t.Helper()
-
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	writeConfigFile(t, filepath.Join(home, ".weixinmp", "config.toml"), "config-app", "config-secret")
-	t.Setenv(envWeixinAppID, "")
-	t.Setenv(envWeixinSecret, "")
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if got := q.Get("appid"); got != "config-app" {
-			t.Fatalf("appid = %q, want %q", got, "config-app")
-		}
-		if got := q.Get("secret"); got != "config-secret" {
-			t.Fatalf("secret = %q, want %q", got, "config-secret")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	var cli CLI
-	parser, err := kong.New(&cli,
-		kong.Name("weixinmp"),
-		kong.UsageOnError(),
-		kong.Vars{"version": buildVersion()},
-	)
-	if err != nil {
-		t.Fatalf("kong.New() err = %v, want nil", err)
-	}
-
-	ctx, err := parser.Parse([]string{
-		"token", "get",
-		"--base-url", srv.URL,
-		"--timeout", "2s",
-		"--output", "text",
-	})
-	if err != nil {
-		t.Fatalf("Parse() err = %v, want nil", err)
-	}
-
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := ctx.Run(); err != nil {
-			t.Fatalf("Run() err = %v, want nil", err)
-		}
-	})
-	if got, want := stdout, "abc\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-}
-
-func TestCLIConfigFlagUsedForTokenGet(t *testing.T) {
-	t.Helper()
-
-	tmp := t.TempDir()
-	configPath := filepath.Join(tmp, "custom.toml")
-	writeConfigFile(t, configPath, "flag-app", "flag-secret")
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if got := q.Get("appid"); got != "flag-app" {
-			t.Fatalf("appid = %q, want %q", got, "flag-app")
-		}
-		if got := q.Get("secret"); got != "flag-secret" {
-			t.Fatalf("secret = %q, want %q", got, "flag-secret")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"abc","expires_in":7200}`))
-	}))
-	defer srv.Close()
-
-	var cli CLI
-	parser, err := kong.New(&cli,
-		kong.Name("weixinmp"),
-		kong.UsageOnError(),
-		kong.Vars{"version": buildVersion()},
-	)
-	if err != nil {
-		t.Fatalf("kong.New() err = %v, want nil", err)
-	}
-
-	ctx, err := parser.Parse([]string{
-		"--config", configPath,
-		"token", "get",
-		"--base-url", srv.URL,
-		"--timeout", "2s",
-		"--output", "text",
-	})
-	if err != nil {
-		t.Fatalf("Parse() err = %v, want nil", err)
-	}
-
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := ctx.Run(); err != nil {
-			t.Fatalf("Run() err = %v, want nil", err)
-		}
-	})
-	if got, want := stdout, "abc\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
 }

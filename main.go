@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +22,6 @@ type CLI struct {
 	Version    kong.VersionFlag `help:"Print version information and quit."`
 	ConfigPath string           `name:"config" help:"Path to config file (default: ~/.weixinmp/config.toml)."`
 
-	Token           TokenCmd           `cmd:"" help:"WeChat Official Account access token helpers."`
 	Signature       SignatureCmd       `cmd:"" help:"WeChat signature helpers."`
 	OfficialAccount OfficialAccountCmd `cmd:"" help:"WeChat Official Account helpers powered by silenceper/wechat."`
 
@@ -32,60 +30,40 @@ type CLI struct {
 	configErr    error
 }
 
-type TokenCmd struct {
-	Get TokenGetCmd `cmd:"" help:"Fetch access token via client_credential."`
-}
-
-type TokenGetCmd struct {
-	AppID   string        `help:"WeChat appid (overrides env/config)."`
-	Secret  string        `help:"WeChat secret (overrides env/config)."`
-	Timeout time.Duration `help:"HTTP timeout." default:"10s"`
-	BaseURL string        `help:"WeChat API base URL." default:"https://api.weixin.qq.com"`
-
-	Output string `help:"Output format." enum:"text,json" default:"text"`
-}
-
-func (c *TokenGetCmd) Run(cli *CLI) error {
-	appID, secret, err := cli.resolveCredentials(c.AppID, c.Secret)
-	if err != nil {
-		return err
-	}
-
-	httpClient := &http.Client{Timeout: c.Timeout}
-	client := &weixinmp.Client{
-		BaseURL:    c.BaseURL,
-		HTTPClient: httpClient,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
-	defer cancel()
-
-	debugf(cli, "requesting access token from %s", c.BaseURL)
-	token, err := client.GetAccessToken(ctx, appID, secret)
-	if err != nil {
-		return err
-	}
-
-	switch c.Output {
-	case "text":
-		fmt.Fprintln(os.Stdout, token.AccessToken)
-		return nil
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(token)
-	default:
-		return fmt.Errorf("unsupported output format %q", c.Output)
-	}
-}
-
 type SignatureCmd struct {
 	Compute SignatureComputeCmd `cmd:"" help:"Compute SHA1 signature for server validation."`
 	Verify  SignatureVerifyCmd  `cmd:"" help:"Verify a SHA1 signature for server validation."`
 }
 
 type OfficialAccountCmd struct {
+	GetCallbackIP  OfficialAccountGetCallbackIPCmd  `cmd:"" help:"Fetch WeChat callback IP addresses for the official account."`
 	GetAPIDomainIP OfficialAccountGetAPIDomainIPCmd `cmd:"" help:"Fetch WeChat API domain IP addresses for the official account."`
+	ClearQuota     OfficialAccountClearQuotaCmd     `cmd:"" help:"Clear official account API call quota counters."`
+}
+
+type OfficialAccountGetCallbackIPCmd struct {
+	AppID   string        `help:"WeChat appid (overrides env/config)."`
+	Secret  string        `help:"WeChat secret (overrides env/config)."`
+	Timeout time.Duration `help:"HTTP timeout." default:"10s"`
+
+	Output string `help:"Output format." enum:"text,json" default:"text"`
+}
+
+func (c *OfficialAccountGetCallbackIPCmd) Run(cli *CLI) error {
+	appID, secret, err := cli.resolveCredentials(c.AppID, c.Secret)
+	if err != nil {
+		return err
+	}
+
+	client := newOfficialAccountClient(c.Timeout)
+
+	debugf(cli, "requesting official account callback IP via silenceper/wechat")
+	ipList, err := client.GetCallbackIP(appID, secret)
+	if err != nil {
+		return err
+	}
+
+	return writeIPList(c.Output, ipList.IPList)
 }
 
 type OfficialAccountGetAPIDomainIPCmd struct {
@@ -102,10 +80,7 @@ func (c *OfficialAccountGetAPIDomainIPCmd) Run(cli *CLI) error {
 		return err
 	}
 
-	httpClient := &http.Client{Timeout: c.Timeout}
-	client := &weixinmp.OfficialAccountClient{
-		HTTPClient: httpClient,
-	}
+	client := newOfficialAccountClient(c.Timeout)
 
 	debugf(cli, "requesting official account API domain IP via silenceper/wechat")
 	ipList, err := client.GetAPIDomainIP(appID, secret)
@@ -113,18 +88,58 @@ func (c *OfficialAccountGetAPIDomainIPCmd) Run(cli *CLI) error {
 		return err
 	}
 
-	switch c.Output {
+	return writeIPList(c.Output, ipList.IPList)
+}
+
+type OfficialAccountClearQuotaCmd struct {
+	AppID   string        `help:"WeChat appid (overrides env/config)."`
+	Secret  string        `help:"WeChat secret (overrides env/config)."`
+	Timeout time.Duration `help:"HTTP timeout." default:"10s"`
+
+	Output string `help:"Output format." enum:"text,json" default:"text"`
+}
+
+func (c *OfficialAccountClearQuotaCmd) Run(cli *CLI) error {
+	appID, secret, err := cli.resolveCredentials(c.AppID, c.Secret)
+	if err != nil {
+		return err
+	}
+
+	client := newOfficialAccountClient(c.Timeout)
+
+	debugf(cli, "clearing official account API quota via silenceper/wechat")
+	if err := client.ClearQuota(appID, secret); err != nil {
+		return err
+	}
+
+	return writeOK(c.Output)
+}
+
+func newOfficialAccountClient(timeout time.Duration) *weixinmp.OfficialAccountClient {
+	return &weixinmp.OfficialAccountClient{
+		HTTPClient: &http.Client{Timeout: timeout},
+	}
+}
+
+func writeJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(v)
+}
+
+func writeIPList(output string, ipList []string) error {
+	switch output {
 	case "text":
-		for _, ip := range ipList.IPList {
+		for _, ip := range ipList {
 			fmt.Fprintln(os.Stdout, ip)
 		}
 		return nil
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(ipList)
+		return writeJSON(struct {
+			IPList []string `json:"ip_list"`
+		}{IPList: ipList})
 	default:
-		return fmt.Errorf("unsupported output format %q", c.Output)
+		return fmt.Errorf("unsupported output format %q", output)
 	}
 }
 
@@ -181,4 +196,18 @@ func debugf(cli *CLI, format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "debug: "+format+"\n", args...)
+}
+
+func writeOK(output string) error {
+	switch output {
+	case "text":
+		fmt.Fprintln(os.Stdout, "ok")
+		return nil
+	case "json":
+		return writeJSON(struct {
+			OK bool `json:"ok"`
+		}{OK: true})
+	default:
+		return fmt.Errorf("unsupported output format %q", output)
+	}
 }
