@@ -1,0 +1,73 @@
+name: Post Release Self Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Formula/weixinmp.rb"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew-install:
+    name: Homebrew Install Smoke Test
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read expected version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(ruby -e 'content = File.read("Formula/weixinmp.rb"); match = content.match(/version\s+"([^"]+)"/); abort("missing version in Formula/weixinmp.rb") unless match; puts match[1]')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Reset local Homebrew state
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew uninstall --force weixinmp || true
+          brew untap bestony/weixinmp || true
+
+      - name: Tap current repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew tap --custom-remote bestony/weixinmp https://github.com/bestony/weixinmp
+
+      - name: Install formula from tap
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew install bestony/weixinmp/weixinmp
+
+      - name: Verify installed binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          output="$(weixinmp --version)"
+          echo "${output}"
+
+          if [[ "${output}" != *"v${{ steps.meta.outputs.version }}"* ]]; then
+            echo "expected version v${{ steps.meta.outputs.version }}, got: ${output}" >&2
+            exit 1
+          fi
+
+      - name: Run formula test block
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew test bestony/weixinmp/weixinmp

@@ -38,7 +38,35 @@
 
 ## 安装与构建
 
-### 方式一：本地构建
+### 方式一：使用 Homebrew 安装
+
+当前仓库名不是 `homebrew-*`，添加 tap 时需要显式指定仓库 URL：
+
+```bash
+brew tap --custom-remote bestony/weixinmp https://github.com/bestony/weixinmp
+```
+
+然后安装：
+
+```bash
+brew install bestony/weixinmp/weixinmp
+```
+
+如果已经 tap 成功，也可以使用短命令：
+
+```bash
+brew install weixinmp
+```
+
+升级到最新 release：
+
+```bash
+brew update && brew upgrade weixinmp
+```
+
+Homebrew formula 会在每次发布 `v*` GitHub Release 后自动更新，安装包来源于对应 release 里的预编译压缩包。
+
+### 方式二：本地构建
 
 ```bash
 go build .
@@ -50,13 +78,13 @@ go build .
 ./weixinmp --help
 ```
 
-### 方式二：源码直接运行
+### 方式三：源码直接运行
 
 ```bash
 go run . --help
 ```
 
-### 方式三：下载预编译版本
+### 方式四：下载预编译版本
 
 仓库的 GitHub Actions 在打 `v*` 标签时会自动构建并发布以下平台的压缩包：
 
