@@ -1,7 +1,7 @@
 [
   {
     "id": "darwin-x64",
-    "packageName": "@bestony/weixinmp-darwin-x64",
+    "packageName": "@awesomecli/weixinmp-darwin-x64",
     "platform": "darwin",
     "arch": "x64",
     "goos": "darwin",
@@ -10,7 +10,7 @@
   },
   {
     "id": "darwin-arm64",
-    "packageName": "@bestony/weixinmp-darwin-arm64",
+    "packageName": "@awesomecli/weixinmp-darwin-arm64",
     "platform": "darwin",
     "arch": "arm64",
     "goos": "darwin",
@@ -19,7 +19,7 @@
   },
   {
     "id": "linux-x64",
-    "packageName": "@bestony/weixinmp-linux-x64",
+    "packageName": "@awesomecli/weixinmp-linux-x64",
     "platform": "linux",
     "arch": "x64",
     "goos": "linux",
@@ -28,7 +28,7 @@
   },
   {
     "id": "linux-arm64",
-    "packageName": "@bestony/weixinmp-linux-arm64",
+    "packageName": "@awesomecli/weixinmp-linux-arm64",
     "platform": "linux",
     "arch": "arm64",
     "goos": "linux",
@@ -37,7 +37,7 @@
   },
   {
     "id": "win32-x64",
-    "packageName": "@bestony/weixinmp-win32-x64",
+    "packageName": "@awesomecli/weixinmp-win32-x64",
     "platform": "win32",
     "arch": "x64",
     "goos": "windows",

@@ -61,6 +61,6 @@ test("resolveBinary fails when the platform package is missing", (t) => {
   const install = makeTempInstall(t, target, false);
   assert.throws(
     () => resolveBinary(install.mainDir, "darwin", "arm64"),
-    /Missing optional dependency "@bestony\/weixinmp-darwin-arm64"/,
+    /Missing optional dependency "@awesomecli\/weixinmp-darwin-arm64"/,
   );
 });
