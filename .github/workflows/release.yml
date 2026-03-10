@@ -95,7 +95,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BINARY_NAME }}_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: dist/${{ env.BINARY_NAME }}_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+          path: |
+            dist/${{ env.BINARY_NAME }}_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+            dist/${{ env.BINARY_NAME }}_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
           if-no-files-found: error
 
   release:
@@ -109,10 +111,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Prepare npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node ./scripts/npm/prepare-packages.mjs \
+            --pack \
+            --version "${GITHUB_REF_NAME}" \
+            --dist-dir dist \
+            --output-dir dist/npm
 
       - name: Render Homebrew formula
         shell: bash
@@ -135,6 +154,15 @@ jobs:
             dist/**/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node ./scripts/npm/publish-packages.mjs --manifest dist/npm/manifest.json
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Checkout default branch
         uses: actions/checkout@v4

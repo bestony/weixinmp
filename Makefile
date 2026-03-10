@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 
 GO ?= go
+NODE ?= node
 PYTHON ?= python3
 
 BINARY_NAME ?= weixinmp
@@ -13,6 +14,10 @@ DIST_DIR ?= dist
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 TAG ?= $(VERSION)
+NPM_PACKAGE_VERSION ?= $(if $(filter dev,$(VERSION)),0.0.0-dev,$(VERSION))
+NPM_RELEASE_TAG ?= $(TAG)
+NPM_OUTPUT_DIR ?= $(DIST_DIR)/npm
+NPM_TARGETS ?= all
 
 BUILD_FLAGS ?= -trimpath
 GO_LD_FLAGS ?= -X main.version=$(VERSION) -X main.commit=$(COMMIT)
@@ -31,7 +36,7 @@ PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build run test test-cli cover cover-check cover-func clean fmt package package-all
+.PHONY: help build run test test-cli cover cover-check cover-func clean fmt package package-all package-npm pack-npm verify-npm-install
 
 help: ## 显示可用目标
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -86,3 +91,12 @@ package-all: ## 按 release 工作流的默认平台矩阵全部打包
 		echo "==> packaging $$goos/$$goarch"; \
 		$(MAKE) package GOOS="$$goos" GOARCH="$$goarch" VERSION="$(VERSION)" TAG="$(TAG)" COMMIT="$(COMMIT)" GO_LD_FLAGS='$(GO_LD_FLAGS)'; \
 	done
+
+package-npm: ## 基于 dist 目录生成 npm 主包和平台包目录
+	NPM_TARGETS="$(NPM_TARGETS)" $(NODE) ./scripts/npm/prepare-packages.mjs --version "$(NPM_PACKAGE_VERSION)" --tag "$(NPM_RELEASE_TAG)" --dist-dir "$(DIST_DIR)" --output-dir "$(NPM_OUTPUT_DIR)"
+
+pack-npm: ## 基于 dist 目录生成并打包 npm 主包和平台包
+	NPM_TARGETS="$(NPM_TARGETS)" $(NODE) ./scripts/npm/prepare-packages.mjs --pack --version "$(NPM_PACKAGE_VERSION)" --tag "$(NPM_RELEASE_TAG)" --dist-dir "$(DIST_DIR)" --output-dir "$(NPM_OUTPUT_DIR)"
+
+verify-npm-install: ## 安装本地生成的 npm 包并校验 CLI 可执行
+	$(NODE) ./scripts/npm/verify-install.mjs --manifest "$(NPM_OUTPUT_DIR)/manifest.json"

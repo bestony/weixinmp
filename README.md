@@ -38,7 +38,34 @@
 
 ## 安装与构建
 
-### 方式一：使用 Homebrew 安装
+### 方式一：使用 npm 安装
+
+发布到 npm 后，可以直接安装当前平台对应的预编译 binary，并注册 `weixinmp` 命令：
+
+```bash
+npm install -g weixinmp
+```
+
+安装完成后即可直接执行：
+
+```bash
+weixinmp --version
+weixinmp --help
+```
+
+也可以不全局安装，直接运行：
+
+```bash
+npx weixinmp --help
+```
+
+npm 包会根据当前平台自动分发对应 binary，目前支持：
+
+- Linux `amd64` / `arm64`
+- macOS `amd64` / `arm64`
+- Windows `amd64`
+
+### 方式二：使用 Homebrew 安装
 
 当前仓库名不是 `homebrew-*`，添加 tap 时需要显式指定仓库 URL：
 
@@ -66,7 +93,7 @@ brew update && brew upgrade weixinmp
 
 Homebrew formula 会在每次发布 `v*` GitHub Release 后自动更新，安装包来源于对应 release 里的预编译压缩包。
 
-### 方式二：本地构建
+### 方式三：本地构建
 
 ```bash
 go build .
@@ -78,13 +105,13 @@ go build .
 ./weixinmp --help
 ```
 
-### 方式三：源码直接运行
+### 方式四：源码直接运行
 
 ```bash
 go run . --help
 ```
 
-### 方式四：下载预编译版本
+### 方式五：下载预编译版本
 
 仓库的 GitHub Actions 在打 `v*` 标签时会自动构建并发布以下平台的压缩包：
 
@@ -457,9 +484,12 @@ go run . --help
 go test ./...
 go test ./... -run TestCLI
 go test ./... -coverprofile=coverage.out -covermode=atomic
+make package-all VERSION=v0.0.0 TAG=v0.0.0
+make pack-npm NPM_PACKAGE_VERSION=0.0.0 NPM_RELEASE_TAG=v0.0.0
+make verify-npm-install
 ```
 
-其中最后一条命令与 CI 保持一致，并要求总覆盖率达到 `100%`。
+其中 `go test ./... -coverprofile=coverage.out -covermode=atomic` 与 CI 的覆盖率门禁保持一致，并要求总覆盖率达到 `100%`。后两条命令分别用于生成 npm 发布包和验证本地安装链路。
 
 ### 本地测试凭据
 

@@ -4,7 +4,21 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  workflow-lint:
+    name: GitHub Actions Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: rhysd/actionlint@v1
+
   test:
     name: Go Unit Tests (100% Coverage)
     runs-on: ubuntu-latest
@@ -35,3 +49,75 @@ jobs:
           echo "Total coverage: ${total}%"
           awk -v total="${total}" 'BEGIN { if (total < 100) { printf("Coverage %.1f%% is below 100%%\n", total); exit 1 } }'
 
+  npm-smoke:
+    name: npm Install Smoke Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run npm unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Build current platform binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf dist
+
+          TAG="v0.0.0-test"
+          GOOS="$(go env GOOS)"
+          GOARCH="$(go env GOARCH)"
+          EXT=""
+          if [[ "${GOOS}" == "windows" ]]; then
+            EXT=".exe"
+          fi
+
+          OUTDIR="dist/weixinmp_${TAG}_${GOOS}_${GOARCH}"
+          mkdir -p "${OUTDIR}"
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+            go build -trimpath \
+              -ldflags "-X main.version=${TAG} -X main.commit=smoketest" \
+              -o "${OUTDIR}/weixinmp${EXT}" \
+              .
+
+      - name: Pack npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ./scripts/npm/prepare-packages.mjs \
+            --pack \
+            --version v0.0.0-test \
+            --dist-dir dist \
+            --output-dir dist/npm \
+            --targets current
+
+      - name: Verify npm installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ./scripts/npm/verify-install.mjs --manifest dist/npm/manifest.json
